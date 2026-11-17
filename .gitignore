@@ -1,0 +1,17 @@
+﻿# Go build artifacts and test binaries
+*.exe
+*.test
+*.out
+*.prof
+
+# local scratch/cache
+.gocache/
+_gocache/
+_gotmp/
+_smoke_*/
+
+# local runtime data
+DevDock.exe
+*.log
+config.json
+runtime.json

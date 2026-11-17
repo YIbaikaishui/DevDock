@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevDock</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M6.5 10.5l2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11.5 15.5h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <span class="title">DevDock</span>
+    </div>
+    <div class="summary" id="summary">正在连接…</div>
+    <div class="topactions">
+      <button class="btn ghost" id="btn-refresh" title="刷新列表">刷新</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span>项目</span>
+        <button class="btn small" id="btn-new">+ 新建项目</button>
+      </div>
+      <ul class="project-list" id="project-list"></ul>
+      <div class="empty" id="empty-hint" hidden>
+        <p class="empty-title">还没有任何项目</p>
+        <p class="empty-desc">点击上方"新建项目"添加第一个启动配方。<br>例如：命令 <code>npm run dev</code>，端口 <code>5173</code>。</p>
+      </div>
+    </aside>
+
+    <section class="detail" id="detail">
+      <div class="placeholder" id="placeholder">
+        <p class="placeholder-title">从左侧选择或新建一个项目</p>
+        <p class="placeholder-desc">DevDock 会把项目命令放到独立的进程 Job 里运行，停止时整棵进程树一起清理，不留孤儿进程。</p>
+      </div>
+
+      <div class="detail-body" id="detail-body" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 id="d-name">—</h2>
+              <p class="cwd" id="d-cwd">—</p>
+            </div>
+            <span class="pill" id="d-status">—</span>
+          </div>
+          <dl class="meta">
+            <div><dt>命令</dt><dd><code id="d-command">—</code></dd></div>
+            <div><dt>端口</dt><dd id="d-port">—</dd></div>
+            <div><dt>PID</dt><dd id="d-pid">—</dd></div>
+            <div><dt>运行时长</dt><dd id="d-uptime">—</dd></div>
+            <div><dt>就绪</dt><dd id="d-readiness">—</dd></div>
+          </dl>
+          <div class="error-box" id="d-error" hidden></div>
+          <div class="actions">
+            <button class="btn primary" id="btn-start">启动</button>
+            <button class="btn" id="btn-stop">停止</button>
+            <button class="btn" id="btn-restart">重启</button>
+            <button class="btn ghost" id="btn-edit">编辑</button>
+            <button class="btn ghost" id="btn-folder">打开目录</button>
+            <button class="btn danger ghost" id="btn-delete">删除</button>
+          </div>
+        </div>
+
+        <div class="card logcard">
+          <div class="card-head">
+            <h3>日志</h3>
+            <div class="logtools">
+              <span class="counter" id="log-count">0 行</span>
+              <label class="check"><input type="checkbox" id="chk-follow" checked> 跟随</label>
+              <label class="check" title="部分项目可能输出 GBK 编码的中文"><input type="checkbox" id="chk-gbk"> GBK</label>
+              <button class="btn small ghost" id="btn-clearlog">清屏</button>
+            </div>
+          </div>
+          <div class="gapbar" id="gapbar" hidden>部分日志已过期，已跳过中间内容</div>
+          <pre class="logview" id="logview"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 新建/编辑抽屉 -->
+<div class="drawer-mask" id="drawer-mask" hidden>
+  <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer-head">
+      <h2 id="drawer-title">新建项目</h2>
+      <button class="btn ghost small" id="btn-close-drawer">关闭</button>
+    </div>
+    <form id="project-form" class="form">
+      <label>项目名称 <span class="req">*</span>
+        <input name="name" required maxlength="80" placeholder="例如：前端 dev server">
+      </label>
+      <label>项目 ID
+        <input name="id" maxlength="64" placeholder="留空自动生成，如 web-app">
+        <span class="hint">仅字母、数字、下划线和连字符；创建后不可修改</span>
+      </label>
+      <label>工作目录 <span class="req">*</span>
+        <input name="cwd" required placeholder="D:\proj\web-app">
+        <span class="hint">必须是已存在的绝对路径</span>
+      </label>
+      <label>启动命令 <span class="req">*</span>
+        <input name="command" required maxlength="8192" placeholder="npm run dev">
+        <span class="hint">单行命令，通过 cmd 执行。请写前台阻塞式命令，勿写 start，否则进程树无法被可靠清理</span>
+      </label>
+      <div class="row">
+        <label>端口
+          <input name="port" type="number" min="0" max="65535" placeholder="5173">
+        </label>
+        <label>就绪路径
+          <input name="readyPath" placeholder="/">
+        </label>
+      </div>
+      <div class="row">
+        <label>就绪超时（秒）
+          <input name="readyTimeout" type="number" min="1" max="300" placeholder="30">
+        </label>
+        <label>启动 DevDock 时自动启动
+          <select name="autostart">
+            <option value="false">否</option>
+            <option value="true">是</option>
+          </select>
+        </label>
+      </div>
+      <label>环境变量
+        <textarea name="env" rows="3" placeholder="每行一个 KEY=VALUE"></textarea>
+      </label>
+      <div class="form-error" id="form-error" hidden></div>
+      <div class="drawer-actions">
+        <button type="button" class="btn ghost" id="btn-cancel">取消</button>
+        <button type="submit" class="btn primary" id="btn-save">保存</button>
+      </div>
+    </form>
+  </aside>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
