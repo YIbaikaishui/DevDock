@@ -30,6 +30,7 @@ const (
 	CodeConfigInvalid  = "config_invalid"
 	CodeUnauthorized   = "unauthorized"
 	CodeInternal       = "internal"
+	CodeScanInProgress = "scan_in_progress"
 )
 
 // writeJSON 输出 JSON 响应。

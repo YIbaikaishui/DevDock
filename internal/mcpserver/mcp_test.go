@@ -4,10 +4,22 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+
+	"devdock/internal/client"
 )
+
+// stubDiscover 代替 client.Discover，返回一个不会被真正使用的客户端。
+//
+// 必须注入：真实的 Discover 在找不到运行实例时会执行 spawnService，
+// 而它用 os.Executable() 取自身路径 —— 在测试里那就是测试二进制自己。
+// 未注入时的后果是测试程序把自身当服务拉起，无限自我复制。
+func stubDiscover(bool) (*client.Client, error) {
+	return client.New(1, "test-token"), nil
+}
 
 // runSession 用给定的输入行跑一次 MCP 会话，返回解析后的响应列表与原始 stdout。
 func runSession(t *testing.T, input string) ([]Response, string) {
@@ -15,6 +27,7 @@ func runSession(t *testing.T, input string) ([]Response, string) {
 	var stdout, stderr bytes.Buffer
 
 	srv := New(strings.NewReader(input), &stdout, &stderr)
+	srv.discover = stubDiscover
 	if err := srv.Serve(); err != nil {
 		t.Fatalf("Serve 返回错误: %v", err)
 	}
@@ -241,6 +254,45 @@ func TestToolsCallUnknownTool(t *testing.T) {
 	}
 	if isErr, _ := result["isError"].(bool); !isErr {
 		t.Fatal("未知工具应标记 isError=true")
+	}
+}
+
+// TestToolsCallServiceUnavailable 验证服务不可用时工具返回可读错误，
+// 而不是崩溃或协议层错误 —— agent 需要看到人能看懂的原因。
+func TestToolsCallServiceUnavailable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	srv := New(strings.NewReader(
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"devdock_list","arguments":{}}}`+"\n",
+	), &stdout, &stderr)
+	srv.discover = func(bool) (*client.Client, error) {
+		return nil, errors.New("服务未运行")
+	}
+	if err := srv.Serve(); err != nil {
+		t.Fatalf("Serve 返回错误: %v", err)
+	}
+
+	var resp Response
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &resp); err != nil {
+		t.Fatalf("响应不是合法 JSON: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("服务不可用不应是协议错误: %+v", resp.Error)
+	}
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("应返回 result，实际: %+v", resp.Result)
+	}
+	if isErr, _ := result["isError"].(bool); !isErr {
+		t.Fatal("服务不可用时应标记 isError=true")
+	}
+	content, _ := result["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("应返回 1 段文本，实际 %d", len(content))
+	}
+	part, _ := content[0].(map[string]any)
+	text, _ := part["text"].(string)
+	if !strings.Contains(text, "无法连接") {
+		t.Fatalf("错误文本应说明无法连接，实际: %q", text)
 	}
 }
 

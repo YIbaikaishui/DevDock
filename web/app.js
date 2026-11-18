@@ -28,6 +28,7 @@
     es: null,
     editID: null,
     logVersion: 0,     // 用于丢弃过期异步渲染
+    scan: { controller: null, rows: [] },
   };
 
   const MAX_CLIENT_LINES = 3000;
@@ -458,6 +459,242 @@
     }
   }
 
+  // ---------- 扫描抽屉 ----------
+  // 扫描只读：只产出建议，导入必须由用户显式触发（单条填入表单 / 批量导入）。
+  function openScan() {
+    $('#scan-mask').hidden = false;
+    $('#scan-list').textContent = '';
+    $('#scan-error').hidden = true;
+    $('#scan-summary').textContent = '尚未扫描';
+    $('#scan-status').textContent = '';
+    $('#scan-roots').value = '';
+    const start = $('#scan-start');
+    start.disabled = false;
+    start.textContent = '开始扫描';
+    $('#scan-cancel').hidden = true;
+    S.scan.rows = [];
+    updateScanImport();
+    setTimeout(() => $('#scan-roots').focus(), 30);
+  }
+
+  function closeScan() {
+    if (S.scan.controller) {
+      S.scan.controller.abort();
+      S.scan.controller = null;
+    }
+    $('#scan-mask').hidden = true;
+  }
+
+  function parseRoots(text) {
+    return (text || '').split(/[;\n]+/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  async function runScan() {
+    const roots = parseRoots($('#scan-roots').value);
+    const body = { depth: 3, budgetMs: 2000, limit: 100 };
+    if (roots.length) body.roots = roots;
+    if ($('#scan-all').checked) body.includeLow = true;
+
+    const controller = new AbortController();
+    S.scan.controller = controller;
+    const start = $('#scan-start');
+    start.disabled = true;
+    start.textContent = '扫描中…';
+    $('#scan-cancel').hidden = false;
+    $('#scan-status').textContent = '扫描中…';
+    $('#scan-error').hidden = true;
+    $('#scan-list').textContent = '';
+    $('#scan-summary').textContent = '';
+
+    let res;
+    try {
+      res = await api('/api/scan', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      if (controller.signal.aborted) {
+        $('#scan-status').textContent = '已取消';
+      } else {
+        $('#scan-status').textContent = '';
+        const box = $('#scan-error');
+        box.textContent = e.message;
+        box.hidden = false;
+      }
+      start.disabled = false;
+      start.textContent = '开始扫描';
+      $('#scan-cancel').hidden = true;
+      S.scan.controller = null;
+      return;
+    }
+    S.scan.controller = null;
+    start.disabled = false;
+    start.textContent = '开始扫描';
+    $('#scan-cancel').hidden = true;
+    $('#scan-status').textContent = '';
+    renderScanResults(res);
+  }
+
+  function renderScanResults(res) {
+    const list = $('#scan-list');
+    list.textContent = '';
+    const rows = res.suggestions || [];
+    S.scan.rows = rows;
+
+    if (rows.length === 0) {
+      const empty = el('div', 'scan-empty');
+      empty.appendChild(el('p', 'empty-title', '没有发现可识别的项目'));
+      empty.appendChild(el('p', 'empty-desc', '可以指定一个根目录再试。'));
+      list.appendChild(empty);
+    } else {
+      // 按 group 分组展示，monorepo 里同一仓库的多条建议归在一起。
+      const groups = new Map();
+      for (const s of rows) {
+        const g = s.group || '(未分组)';
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(s);
+      }
+      for (const [g, items] of groups) {
+        list.appendChild(el('div', 'scan-group', g));
+        // A8：组内默认只展开 5 条，其余折起来，避免 monorepo 刷屏。
+        const collapsed = items.length > 5;
+        for (const s of (collapsed ? items.slice(0, 5) : items)) list.appendChild(scanRow(s));
+        if (collapsed) {
+          const more = el('button', 'btn small ghost scan-more', '还有 ' + (items.length - 5) + ' 条');
+          more.addEventListener('click', () => {
+            for (const s of items.slice(5)) more.parentNode.insertBefore(scanRow(s), more);
+            more.remove();
+            updateScanImport();
+          });
+          list.appendChild(more);
+        }
+      }
+    }
+
+    const parts = ['扫描 ' + res.scannedDirs + ' 个目录', res.elapsedMs + 'ms', rows.length + ' 条建议'];
+    if (res.timedOut) parts.push('已达时间预算');
+    if (res.truncated) parts.push('结果已截断');
+    $('#scan-summary').textContent = parts.join(' · ');
+    updateScanImport();
+  }
+
+  function scanRow(s) {
+    const row = el('div', 'scan-row' + (s.duplicate ? ' duplicate' : ''));
+
+    const pickLabel = el('label', 'scan-check');
+    const pick = document.createElement('input');
+    pick.type = 'checkbox';
+    pick.className = 'scan-pick';
+    // A3：默认只勾「非 low，且已知端口 / 已识别框架 / high 置信度」。
+    // 既没端口又没框架、又不是 high 的裸脚本（本机约 17 条，含 `node dist/cli.js --no-open`
+    // 这类跑完即退出的 CLI 工具）不替用户勾——列出来让他自己点，也不让「一键导入」变成一键导入
+    // 一堆启动即退出的条目。high 主要是 Go 服务（go run . 没有框架与端口线索，但证据充分）。
+    pick.checked = !s.duplicate && !!s.command && s.confidence !== 'low' &&
+      (s.port > 0 || !!s.framework || s.confidence === 'high');
+    pick.dataset.idx = String(S.scan.rows.indexOf(s));
+    pick.addEventListener('click', (e) => e.stopPropagation());
+    pickLabel.appendChild(pick);
+    row.appendChild(pickLabel);
+
+    const info = el('div', 'scan-info');
+    const line1 = el('div', 'scan-line1');
+    line1.appendChild(el('span', 'scan-name', s.name));
+    if (s.framework) line1.appendChild(el('span', 'scan-badge', s.framework));
+    line1.appendChild(el('span', 'scan-badge kind', s.kind));
+    if (s.confidence === 'low') line1.appendChild(el('span', 'scan-badge low', 'low'));
+    if (s.duplicate) line1.appendChild(el('span', 'scan-badge dup', '已存在'));
+    info.appendChild(line1);
+
+    info.appendChild(el('div', 'scan-cmd', s.command || '（判不出启动命令，导入后需手填）'));
+
+    const sub = [s.cwd, s.port > 0 ? ':' + s.port : '端口未推断'];
+    if (s.portInUse) sub.push('端口 ' + s.port + ' 当前被占用');
+    info.appendChild(el('div', 'scan-sub', sub.join(' · ')));
+
+    if (s.warnings && s.warnings.length) {
+      info.appendChild(el('div', 'scan-warn', s.warnings.join('；')));
+    }
+    row.appendChild(info);
+
+    const fill = el('button', 'btn small ghost scan-fill', '填入表单');
+    fill.addEventListener('click', () => fillFromSuggestion(s));
+    row.appendChild(fill);
+    return row;
+  }
+
+  function updateScanImport() {
+    const n = document.querySelectorAll('#scan-list .scan-pick:checked').length;
+    const btn = $('#scan-import');
+    btn.textContent = '导入选中 (' + n + ')';
+    btn.disabled = n === 0;
+  }
+
+  // 填入表单：不直接创建，用户能在抽屉里改完再走现有 submitForm。
+  function fillFromSuggestion(s) {
+    closeScan();
+    openDrawer(null);
+    const f = $('#project-form');
+    f.name.value = s.name || '';
+    f.id.value = '';
+    f.cwd.value = s.cwd || '';
+    f.command.value = s.command || '';
+    f.port.value = s.port > 0 ? String(s.port) : '';
+    f.readyPath.value = '';
+    f.readyTimeout.value = '';
+    f.autostart.value = 'false';
+    f.env.value = '';
+  }
+
+  // 批量导入：串行 POST，失败的条目保留在列表里并显示服务端 message。
+  async function importSelected() {
+    const picks = Array.from(document.querySelectorAll('#scan-list .scan-pick:checked'))
+      .map((cb) => S.scan.rows[Number(cb.dataset.idx)])
+      .filter(Boolean);
+    if (picks.length === 0) return;
+    // A3：单批 ≤ 20，且导入前二次确认。
+    if (picks.length > 20) {
+      toast('单批最多导入 20 条，请减少勾选（当前 ' + picks.length + ' 条）', 'error');
+      return;
+    }
+    if (!confirm('将导入 ' + picks.length + ' 个项目，继续？')) return;
+
+    const btn = $('#scan-import');
+    btn.disabled = true;
+    const failed = [];
+    let ok = 0;
+    for (const s of picks) {
+      try {
+        await api('/api/projects', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: s.name,
+            cwd: s.cwd,
+            command: s.command,
+            port: s.port,
+            env: {},
+          }),
+        });
+        ok++;
+      } catch (e) {
+        failed.push(s.name + '：' + e.message);
+      }
+    }
+
+    if (failed.length > 0) {
+      const box = $('#scan-error');
+      box.textContent = failed.join('\n');
+      box.hidden = false;
+      btn.disabled = false;
+      toast('有 ' + failed.length + ' 条导入失败，已保留在列表中', 'error');
+      return;
+    }
+
+    toast('已导入 ' + ok + ' 个项目', 'ok');
+    closeScan();
+    await loadProjects();
+  }
+
   // ---------- 事件绑定 ----------
   function bind() {
     $('#btn-refresh').addEventListener('click', () => {
@@ -468,8 +705,21 @@
     $('#btn-cancel').addEventListener('click', closeDrawer);
     $('#project-form').addEventListener('submit', submitForm);
 
+    $('#btn-scan').addEventListener('click', openScan);
+    $('#btn-close-scan').addEventListener('click', closeScan);
+    $('#scan-start').addEventListener('click', runScan);
+    $('#scan-cancel').addEventListener('click', () => {
+      if (S.scan.controller) S.scan.controller.abort();
+    });
+    $('#scan-import').addEventListener('click', importSelected);
+    $('#scan-list').addEventListener('change', updateScanImport);
+
     $('#drawer-mask').addEventListener('click', (e) => {
       if (e.target === $('#drawer-mask')) closeDrawer();
+    });
+
+    $('#scan-mask').addEventListener('click', (e) => {
+      if (e.target === $('#scan-mask')) closeScan();
     });
 
     $('#btn-start').addEventListener('click', () => doAction('start', '已发出启动指令'));
@@ -540,7 +790,9 @@
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !$('#drawer-mask').hidden) closeDrawer();
+      if (e.key !== 'Escape') return;
+      if (!$('#drawer-mask').hidden) { closeDrawer(); return; }
+      if (!$('#scan-mask').hidden) closeScan();
     });
   }
 

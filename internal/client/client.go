@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"devdock/internal/config"
+	"devdock/internal/detect"
 	"devdock/internal/model"
 )
 
@@ -27,6 +29,7 @@ const (
 	CodeNotRunning     = "not_running"
 	CodeConfigInvalid  = "config_invalid"
 	CodeUnauthorized   = "unauthorized"
+	CodeScanInProgress = "scan_in_progress"
 )
 
 // APIError 是服务端返回的结构化错误。
@@ -40,6 +43,9 @@ func (e *APIError) Error() string { return e.Message }
 
 // ErrServiceUnavailable 表示本机没有可用的 DevDock 实例。
 var ErrServiceUnavailable = errors.New("DevDock 服务未运行且无法自动启动")
+
+// ErrRefuseSelfSpawn 表示当前进程不能把自己当作 serve 拉起来。
+var ErrRefuseSelfSpawn = errors.New("当前进程不是 DevDock 主程序，拒绝自我启动服务")
 
 // Client 是与本机 DevDock 服务通信的客户端。
 type Client struct {
@@ -106,15 +112,30 @@ func (c *Client) healthy() bool {
 }
 
 // spawnService 后台启动一个 serve 进程（不打开浏览器）。
+//
+// 前提：当前进程必须就是 DevDock 主程序。因为这里用 os.Executable() 取自身路径
+// 再以 serve 参数重新拉起，如果调用方是测试二进制（或任何嵌入了本包的其它程序），
+// 被拉起的“服务”其实是它自己；子进程拿不到 --test.* 参数语义，会再跑一遍完整流程，
+// 于是每一代都再复制一代，形成进程树爆炸并且一直占着自身 exe 导致清理失败。
 func spawnService() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
+	if isTestProcess() {
+		return fmt.Errorf("%w: %s", ErrRefuseSelfSpawn, exe)
+	}
 	cmd := exec.Command(exe, "serve", "--no-open", "--quiet")
 	// 完全脱离当前控制台，避免 CLI 退出时把服务一起带走。
 	detach(cmd)
 	return cmd.Start()
+}
+
+// isTestProcess 判断当前是否跑在 Go 测试二进制里。
+// testing 包初始化时会注册 test.* 标志，所以查标志比判断文件名后缀可靠，
+// 且在不同平台上的测试二进制命名差异下同样成立。
+func isTestProcess() bool {
+	return flag.Lookup("test.v") != nil || flag.Lookup("test.run") != nil
 }
 
 // do 发起一次带令牌的请求。
@@ -228,10 +249,68 @@ type LogsResult struct {
 	Gap          bool            `json:"gap"`
 }
 
+// ScanRequest 是 POST /api/scan 的请求参数。
+// Depth 为 nil 表示用服务端默认值（3），显式 0 表示只判定根目录自身（SPEC A15）。
+type ScanRequest struct {
+	Roots      []string
+	Depth      *int
+	BudgetMs   int
+	Limit      int
+	IncludeLow bool
+}
+
+// Scan 只读扫描本机项目并返回建议。它不创建任何项目，也不写任何文件。
+func (c *Client) Scan(req ScanRequest) (*detect.Result, error) {
+	// 手写请求体：服务端用 DisallowUnknownFields 严格解析，
+	// 不能直接把业务结构体编码进去。
+	body := struct {
+		Roots      []string `json:"roots,omitempty"`
+		Depth      *int     `json:"depth,omitempty"`
+		BudgetMs   int      `json:"budgetMs,omitempty"`
+		Limit      int      `json:"limit,omitempty"`
+		IncludeLow bool     `json:"includeLow,omitempty"`
+	}{
+		Roots:      req.Roots,
+		Depth:      req.Depth,
+		BudgetMs:   req.BudgetMs,
+		Limit:      req.Limit,
+		IncludeLow: req.IncludeLow,
+	}
+	var res detect.Result
+	if err := c.do(http.MethodPost, "/api/scan", body, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 // Create 创建项目。
+//
+// 只发送服务端接受的字段。服务端用 DisallowUnknownFields 严格解析请求体，
+// 直接把整个 model.Project 编码进去，会因为它自带的 createdAt / updatedAt
+// 被判定为未知字段而整体失败。
 func (c *Client) Create(p model.Project) (model.View, error) {
+	body := struct {
+		ID        string                 `json:"id,omitempty"`
+		Name      string                 `json:"name,omitempty"`
+		Cwd       string                 `json:"cwd"`
+		Command   string                 `json:"command"`
+		Port      int                    `json:"port,omitempty"`
+		Readiness *model.ReadinessConfig `json:"readiness,omitempty"`
+		Env       map[string]string      `json:"env,omitempty"`
+		Autostart bool                   `json:"autostart,omitempty"`
+	}{
+		ID:        p.ID,
+		Name:      p.Name,
+		Cwd:       p.Cwd,
+		Command:   p.Command,
+		Port:      p.Port,
+		Readiness: p.Readiness,
+		Env:       p.Env,
+		Autostart: p.Autostart,
+	}
+
 	var v model.View
-	err := c.do(http.MethodPost, "/api/projects", p, &v)
+	err := c.do(http.MethodPost, "/api/projects", body, &v)
 	return v, err
 }
 

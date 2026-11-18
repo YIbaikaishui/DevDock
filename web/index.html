@@ -20,6 +20,7 @@
     </div>
     <div class="summary" id="summary">正在连接…</div>
     <div class="topactions">
+      <button class="btn ghost" id="btn-scan" title="只读扫描本机可识别的开发项目">扫描本机</button>
       <button class="btn ghost" id="btn-refresh" title="刷新列表">刷新</button>
     </div>
   </header>
@@ -141,6 +142,32 @@
         <button type="submit" class="btn primary" id="btn-save">保存</button>
       </div>
     </form>
+  </aside>
+</div>
+
+<!-- 扫描本机抽屉：只产出建议，导入需用户显式触发 -->
+<div class="drawer-mask" id="scan-mask" hidden>
+  <aside class="drawer scan-drawer" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+    <div class="drawer-head">
+      <h2 id="scan-title">扫描本机项目</h2>
+      <button class="btn ghost small" id="btn-close-scan">关闭</button>
+    </div>
+    <div class="scan-body">
+      <label class="scan-roots-label" for="scan-roots">扫描根目录（留空 = 默认白名单，最多 8 个；用 ; 或换行分隔）</label>
+      <textarea id="scan-roots" rows="2" placeholder="例如：D:\Desktop;D:\projects"></textarea>
+      <div class="scan-tools">
+        <button class="btn primary" id="scan-start">开始扫描</button>
+        <button class="btn" id="scan-cancel" hidden>取消</button>
+        <label class="check" title="默认隐藏 confidence=low 的条目"><input type="checkbox" id="scan-all"> 包含 low</label>
+        <span class="counter" id="scan-status"></span>
+      </div>
+      <div class="scan-error" id="scan-error" hidden></div>
+      <div class="scan-list" id="scan-list"></div>
+      <div class="scan-foot">
+        <button class="btn" id="scan-import" disabled>导入选中 (0)</button>
+        <span class="scan-summary" id="scan-summary">尚未扫描</span>
+      </div>
+    </div>
   </aside>
 </div>
 

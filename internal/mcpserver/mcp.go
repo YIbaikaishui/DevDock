@@ -54,20 +54,36 @@ type RPCError struct {
 	Message string `json:"message"`
 }
 
+// discoverFunc 是服务发现函数，签名与 client.Discover 一致。
+// 做成字段而不是直接调用客户端包，是为了让测试能注入桩实现：
+// 真实的 Discover 会自动拉起 serve 进程，在测试里那等于把测试程序自己拉起来。
+type discoverFunc func(autoStart bool) (*client.Client, error)
+
 // Server 是 stdio MCP 服务器。
 type Server struct {
-	in     *bufio.Reader
-	out    io.Writer
-	errOut io.Writer
+	in       *bufio.Reader
+	out      io.Writer
+	errOut   io.Writer
+	discover discoverFunc
 }
 
 // New 创建服务器。in 通常是 os.Stdin，out 必须是 os.Stdout。
 func New(in io.Reader, out io.Writer, errOut io.Writer) *Server {
 	return &Server{
-		in:     bufio.NewReaderSize(in, 1<<16),
-		out:    out,
-		errOut: errOut,
+		in:       bufio.NewReaderSize(in, 1<<16),
+		out:      out,
+		errOut:   errOut,
+		discover: client.Discover,
 	}
+}
+
+// client 返回用于本次工具调用的客户端。
+func (s *Server) client() (*client.Client, error) {
+	discover := s.discover
+	if discover == nil {
+		discover = client.Discover
+	}
+	return discover(true)
 }
 
 // Serve 进入消息循环，直到 stdin 关闭。
@@ -240,7 +256,7 @@ func (s *Server) handleToolCall(req Request) {
 
 // runTool 执行工具并返回文本结果。
 func (s *Server) runTool(name string, rawArgs json.RawMessage) (string, bool) {
-	c, err := client.Discover(true)
+	c, err := s.client()
 	if err != nil {
 		return "无法连接 DevDock 服务：" + err.Error(), true
 	}

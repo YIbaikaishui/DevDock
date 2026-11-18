@@ -10,12 +10,14 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"devdock/internal/client"
+	"devdock/internal/detect"
 	"devdock/internal/model"
 )
 
@@ -56,6 +58,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdLogs(rest, stdout, stderr)
 	case "add":
 		return cmdAdd(rest, stdout, stderr)
+	case "scan":
+		return cmdScan(rest, stdout, stderr)
 	case "remove", "rm":
 		return cmdRemove(rest, stdout, stderr)
 	case "open":
@@ -100,6 +104,9 @@ func printHelp(w io.Writer) {
   devdock restart <名称|ID>               重启项目
   devdock logs <名称|ID> [-f] [--tail 200] [--json]
   devdock add <名称> --cwd <目录> --command <命令> [--port N] [--readiness /路径] [--env K=V]...
+  devdock add --auto --cwd <目录>           自动识别并创建项目（名称可用位置参数覆盖，命令/端口可用 --command/--port 覆盖）
+  devdock scan [<目录>...] [--root <目录>]... [--depth 3] [--timeout 2s] [--limit 100] [--all] [--json]
+                                           扫描本机可识别的开发项目（只读，不创建项目）
   devdock remove <名称|ID> [--stop]       删除项目
   devdock open <名称|ID>                  在浏览器打开项目端口
   devdock mcp                             stdio MCP 服务器
@@ -120,6 +127,28 @@ func openClient(stderr io.Writer) (*client.Client, int) {
 	return c, ExitOK
 }
 
+// parseInterspersed 解析参数，允许位置参数（项目名）与 --flag 交错出现。
+//
+// 标准库 flag 遇到第一个非 flag 参数就停止解析，于是 README 里最自然的写法
+// `devdock add 名称 --cwd ...` 会让 --cwd、--command 完全不被读取，
+// 最后只报一句“必须同时提供 --cwd 与 --command”，很难看出是解析顺序问题。
+// 这里把位置参数逐个挑出来，剩下的继续交给同一个 FlagSet，两种写法都能用。
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return nil, err
+		}
+		remaining := fs.Args()
+		if len(remaining) == 0 {
+			return positionals, nil
+		}
+		positionals = append(positionals, remaining[0])
+		rest = remaining[1:]
+	}
+}
+
 // exitCodeForError 把错误映射为稳定退出码。
 func exitCodeForError(err error) int {
 	var apiErr *client.APIError
@@ -127,7 +156,7 @@ func exitCodeForError(err error) int {
 		switch apiErr.Code {
 		case client.CodeNotFound:
 			return ExitNotFound
-		case client.CodeAlreadyRunning, client.CodeConflict, client.CodeNotRunning, client.CodePortInUse:
+		case client.CodeAlreadyRunning, client.CodeConflict, client.CodeNotRunning, client.CodePortInUse, client.CodeScanInProgress:
 			return ExitConflict
 		}
 		return ExitError
@@ -187,10 +216,11 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock status <名称|ID>")
 		return ExitUsage
 	}
@@ -199,7 +229,7 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	if c == nil {
 		return code
 	}
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)
@@ -235,10 +265,11 @@ func cmdStart(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
 	waitReady := fs.Bool("wait-ready", false, "等待业务就绪后再返回")
 	timeout := fs.Duration("timeout", 30*time.Second, "等待就绪的超时时间")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock start <名称|ID> [--wait-ready] [--timeout 30s]")
 		return ExitUsage
 	}
@@ -249,7 +280,7 @@ func cmdStart(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// 先解析出真实 ID，避免把显示名传给只接受 ID 的接口。
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)
@@ -289,10 +320,11 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock stop <名称|ID>")
 		return ExitUsage
 	}
@@ -301,7 +333,7 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	if c == nil {
 		return code
 	}
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)
@@ -325,10 +357,11 @@ func cmdRestart(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock restart <名称|ID>")
 		return ExitUsage
 	}
@@ -337,7 +370,7 @@ func cmdRestart(args []string, stdout, stderr io.Writer) int {
 	if c == nil {
 		return code
 	}
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)
@@ -362,10 +395,11 @@ func cmdLogs(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
 	follow := fs.Bool("f", false, "持续跟随输出")
 	tail := fs.Int("tail", 200, "显示最后多少行")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock logs <名称|ID> [-f] [--tail 200]")
 		return ExitUsage
 	}
@@ -374,7 +408,7 @@ func cmdLogs(args []string, stdout, stderr io.Writer) int {
 	if c == nil {
 		return code
 	}
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)
@@ -437,10 +471,22 @@ func (e *envList) Set(v string) error {
 	return nil
 }
 
+// stringList 收集可重复的 --root 参数。
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+func (s *stringList) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+func intPtr(n int) *int { return &n }
+
 func cmdAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
+	auto := fs.Bool("auto", false, "从 --cwd 自动识别名称、命令与端口")
 	cwd := fs.String("cwd", "", "工作目录（必填）")
 	command := fs.String("command", "", "启动命令（必填）")
 	port := fs.Int("port", 0, "声明端口")
@@ -449,16 +495,67 @@ func cmdAdd(args []string, stdout, stderr io.Writer) int {
 	autostart := fs.Bool("autostart", false, "DevDock 启动时自动启动")
 	var envs envList
 	fs.Var(&envs, "env", "环境变量 KEY=VALUE，可重复")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() < 1 {
-		fmt.Fprintln(stderr, "用法：devdock add <名称> --cwd <目录> --command <命令> [选项]")
-		return ExitUsage
+
+	name := ""
+	if len(rest) > 0 {
+		name = rest[0]
 	}
-	if *cwd == "" || *command == "" {
-		fmt.Fprintln(stderr, "必须同时提供 --cwd 与 --command")
-		return ExitUsage
+
+	// --auto：先看 --cwd 本身（depth 0，不扫子目录），识别出名称/命令/端口。
+	// 旧用法（不带 --auto）的校验与后续路径逐字节保持原样。
+	var recognized *detect.Suggestion
+	if *auto {
+		if *cwd == "" {
+			fmt.Fprintln(stderr, "用法：devdock add --auto --cwd <目录> [选项]")
+			return ExitUsage
+		}
+		c, code := openClient(stderr)
+		if c == nil {
+			return code
+		}
+		res, err := c.Scan(client.ScanRequest{
+			Roots:      []string{*cwd},
+			Depth:      intPtr(0),
+			BudgetMs:   2000,
+			Limit:      1,
+			IncludeLow: true,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "自动识别失败：%v\n", err)
+			return exitCodeForError(err)
+		}
+		if len(res.Suggestions) == 0 {
+			fmt.Fprintf(stderr, "在 %s 没有识别到可启动的项目：没有 package.json、go.mod 或服务框架依赖等信号。\n", *cwd)
+			return ExitError
+		}
+		sug := res.Suggestions[0]
+		if strings.TrimSpace(sug.Command) == "" {
+			fmt.Fprintf(stderr, "在 %s 识别到了 %s（%s），但判不出启动命令，请用 --command 手填。\n", *cwd, sug.Name, sug.Kind)
+			return ExitError
+		}
+		recognized = &sug
+		if name == "" {
+			name = sug.Name
+		}
+		if *command == "" {
+			*command = sug.Command
+		}
+		if *port == 0 {
+			*port = sug.Port
+		}
+	} else {
+		if len(rest) < 1 {
+			fmt.Fprintln(stderr, "用法：devdock add <名称> --cwd <目录> --command <命令> [选项]")
+			return ExitUsage
+		}
+		if *cwd == "" || *command == "" {
+			fmt.Fprintln(stderr, "必须同时提供 --cwd 与 --command")
+			return ExitUsage
+		}
 	}
 
 	c, code := openClient(stderr)
@@ -467,7 +564,7 @@ func cmdAdd(args []string, stdout, stderr io.Writer) int {
 	}
 
 	p := model.Project{
-		Name:      fs.Arg(0),
+		Name:      name,
 		Cwd:       *cwd,
 		Command:   *command,
 		Port:      *port,
@@ -492,11 +589,117 @@ func cmdAdd(args []string, stdout, stderr io.Writer) int {
 		return exitCodeForError(err)
 	}
 
+	// 识别结论走 stderr：--json 时 stdout 必须只有 JSON（SPEC B2、红线 5）。
+	if recognized != nil {
+		fmt.Fprintf(stderr, "识别结论：目录 %s → 名称 %s，命令 %s，端口 %d（%s，置信度 %s）\n",
+			*cwd, recognized.Name, recognized.Command, recognized.Port, recognized.Kind, recognized.Confidence)
+		for _, w := range recognized.Warnings {
+			fmt.Fprintf(stderr, "  警告：%s\n", w)
+		}
+	}
+
 	if *asJSON {
 		return emitJSON(stdout, stderr, v)
 	}
 	fmt.Fprintf(stdout, "已创建项目：%s（ID %s）\n", v.Name, v.ID)
 	return ExitOK
+}
+
+// --- scan ---
+
+// cmdScan 只读扫描本机项目并打印建议。它不创建任何项目。
+func cmdScan(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "以 JSON 输出")
+	depth := fs.Int("depth", 3, "扫描深度 1-6")
+	timeout := fs.Duration("timeout", 2*time.Second, "单次扫描时间预算")
+	limit := fs.Int("limit", 100, "建议条数上限")
+	all := fs.Bool("all", false, "连 confidence=low 一起输出")
+	var rootFlags stringList
+	fs.Var(&rootFlags, "root", "扫描根目录，可重复")
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
+		return ExitUsage
+	}
+	if *depth < 1 || *depth > detect.MaxDepth {
+		fmt.Fprintf(stderr, "扫描深度必须在 1-%d 之间\n", detect.MaxDepth)
+		return ExitUsage
+	}
+	if *limit < 1 || *limit > 500 {
+		fmt.Fprintln(stderr, "建议条数上限必须在 1-500 之间")
+		return ExitUsage
+	}
+
+	roots := append(append([]string{}, rest...), rootFlags...)
+	if len(roots) > detect.MaxRoots {
+		fmt.Fprintf(stderr, "根目录最多 %d 个\n", detect.MaxRoots)
+		return ExitUsage
+	}
+
+	// CLI 的 --timeout 与服务端 budgetMs 统一（SPEC A18），并夹到服务端合法区间。
+	budgetMs := int(timeout.Milliseconds())
+	if budgetMs < 100 {
+		budgetMs = 100
+	}
+	if budgetMs > 10000 {
+		budgetMs = 10000
+	}
+
+	c, code := openClient(stderr)
+	if c == nil {
+		return code
+	}
+	res, err := c.Scan(client.ScanRequest{
+		Roots:      roots,
+		Depth:      intPtr(*depth),
+		BudgetMs:   budgetMs,
+		Limit:      *limit,
+		IncludeLow: *all,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "扫描失败：%v\n", err)
+		return exitCodeForError(err)
+	}
+
+	if *asJSON {
+		return emitJSON(stdout, stderr, res)
+	}
+
+	if len(res.Suggestions) == 0 {
+		fmt.Fprintf(stdout, "没有发现可识别的项目（扫描 %d 个目录，用时 %dms）。可以指定 --root 再试。\n",
+			res.ScannedDirs, res.ElapsedMs)
+		return ExitOK
+	}
+
+	rows := [][]string{{"名称", "类型", "框架", "端口", "命令", "目录"}}
+	for _, s := range res.Suggestions {
+		rows = append(rows, []string{
+			s.Name, s.Kind, s.Framework, portText(s.Port), s.Command, relToRoots(s.Cwd, res.Roots),
+		})
+	}
+	printTable(stdout, rows)
+	fmt.Fprintf(stdout, "共 %d 条建议（扫描 %d 个目录，用时 %dms）\n",
+		len(res.Suggestions), res.ScannedDirs, res.ElapsedMs)
+	if res.Truncated {
+		fmt.Fprintln(stdout, "提示：结果已截断（命中条数或目录数上限）。")
+	}
+	if res.TimedOut {
+		fmt.Fprintln(stdout, "提示：扫描已达时间预算，结果可能不完整。")
+	}
+	return ExitOK
+}
+
+// relToRoots 把建议的 cwd 显示成相对某个扫描根的位置，便于阅读。
+func relToRoots(cwd string, roots []string) string {
+	for _, r := range roots {
+		rel, err := filepath.Rel(r, cwd)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		return rel
+	}
+	return cwd
 }
 
 // --- remove ---
@@ -506,10 +709,11 @@ func cmdRemove(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "以 JSON 输出")
 	stopFirst := fs.Bool("stop", false, "删除前先停止")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock remove <名称|ID> [--stop]")
 		return ExitUsage
 	}
@@ -518,7 +722,7 @@ func cmdRemove(args []string, stdout, stderr io.Writer) int {
 	if c == nil {
 		return code
 	}
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)
@@ -539,10 +743,11 @@ func cmdRemove(args []string, stdout, stderr io.Writer) int {
 func cmdOpen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("open", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "用法：devdock open <名称|ID>")
 		return ExitUsage
 	}
@@ -551,7 +756,7 @@ func cmdOpen(args []string, stdout, stderr io.Writer) int {
 	if c == nil {
 		return code
 	}
-	v, err := c.Get(fs.Arg(0))
+	v, err := c.Get(rest[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return exitCodeForError(err)

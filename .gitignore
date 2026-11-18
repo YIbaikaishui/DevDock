@@ -9,6 +9,7 @@
 _gocache/
 _gotmp/
 _smoke_*/
+_e2e/
 
 # local runtime data
 DevDock.exe

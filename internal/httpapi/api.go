@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"devdock/internal/detect"
 	"devdock/internal/logs"
 	"devdock/internal/model"
 	"devdock/internal/runner"
@@ -24,6 +26,7 @@ var Version = "dev"
 type API struct {
 	store  *store.Store
 	runner *runner.Runner
+	scanner *detect.Scanner
 	token  string
 	port   int
 	start  time.Time
@@ -34,12 +37,13 @@ type API struct {
 // New 创建 API。
 func New(st *store.Store, rn *runner.Runner, token string, port int, warn string) *API {
 	return &API{
-		store:  st,
-		runner: rn,
-		token:  token,
-		port:   port,
-		start:  time.Now(),
-		warn:   warn,
+		store:   st,
+		runner:  rn,
+		scanner: detect.NewScanner(),
+		token:   token,
+		port:    port,
+		start:   time.Now(),
+		warn:    warn,
 	}
 }
 
@@ -51,6 +55,7 @@ func (a *API) Handler(web http.Handler) http.Handler {
 	mux.HandleFunc("/api/meta", a.handleMeta)
 	mux.HandleFunc("/api/projects", a.handleProjects)
 	mux.HandleFunc("/api/projects/", a.handleProjectSub)
+	mux.HandleFunc("/api/scan", a.handleScan)
 	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		a.handleEvents(w, r, "")
 	})
@@ -444,6 +449,73 @@ func (a *API) handleOpenFolder(w http.ResponseWriter, r *http.Request, id string
 	_ = cmd.Start()
 	go func() { _ = cmd.Wait() }()
 	writeJSON(w, http.StatusOK, map[string]any{"opened": p.Cwd})
+}
+
+// --- 扫描 ---
+
+// scanRequest 是 POST /api/scan 的请求体（SPEC 6.3）。
+// Depth 用指针区分「未传（默认 3）」与「显式 0（只判定根目录自身）」（SPEC A15）。
+type scanRequest struct {
+	Roots      []string `json:"roots"`
+	Depth      *int     `json:"depth"`
+	BudgetMs   int      `json:"budgetMs"`
+	Limit      int      `json:"limit"`
+	IncludeLow bool     `json:"includeLow"`
+}
+
+// handleScan 只读扫描本机项目并返回建议，不创建任何项目、不写任何文件。
+func (a *API) handleScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, CodeConflict, "仅支持 POST")
+		return
+	}
+
+	var req scanRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, CodeConfigInvalid, err.Error())
+		return
+	}
+	if len(req.Roots) > detect.MaxRoots {
+		writeError(w, http.StatusBadRequest, CodeConfigInvalid, fmt.Sprintf("根目录最多 %d 个", detect.MaxRoots))
+		return
+	}
+	if req.Depth != nil && (*req.Depth < 0 || *req.Depth > detect.MaxDepth) {
+		writeError(w, http.StatusBadRequest, CodeConfigInvalid, fmt.Sprintf("扫描深度必须在 0-%d 之间", detect.MaxDepth))
+		return
+	}
+	if req.BudgetMs != 0 && (req.BudgetMs < 100 || req.BudgetMs > 10000) {
+		writeError(w, http.StatusBadRequest, CodeConfigInvalid, "时间预算必须在 100-10000 毫秒之间")
+		return
+	}
+	if req.Limit != 0 && (req.Limit < 1 || req.Limit > 500) {
+		writeError(w, http.StatusBadRequest, CodeConfigInvalid, "建议条数上限必须在 1-500 之间")
+		return
+	}
+
+	opts := detect.DefaultOptions()
+	opts.Roots = req.Roots
+	opts.IncludeLow = req.IncludeLow
+	opts.Existing = a.store.List()
+	if req.Depth != nil {
+		opts.Depth = *req.Depth
+	}
+	if req.BudgetMs != 0 {
+		opts.BudgetMs = req.BudgetMs
+	}
+	if req.Limit != 0 {
+		opts.Limit = req.Limit
+	}
+
+	res, err := a.scanner.Scan(r.Context(), opts)
+	if err != nil {
+		if errors.Is(err, detect.ErrBusy) {
+			writeError(w, http.StatusConflict, CodeScanInProgress, "已有一次扫描正在进行，请稍后再试")
+			return
+		}
+		writeError(w, http.StatusBadRequest, CodeConfigInvalid, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // --- 请求体解析 ---

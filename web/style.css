@@ -360,6 +360,13 @@ html, body {
   z-index: 50;
 }
 
+/* 作者样式里的 display:flex 优先级高于浏览器默认的 [hidden]{display:none}，
+   少了这条，JS 把 hidden 设为 true 后抽屉仍然可见、且遮罩挡住整个页面，
+   表现为「新建项目抽屉关不掉」。 */
+.drawer-mask[hidden] {
+  display: none;
+}
+
 .drawer {
   width: 480px;
   max-width: 92vw;
@@ -419,6 +426,187 @@ html, body {
   gap: 8px;
   padding-top: 4px;
   margin-top: auto;
+}
+
+/* ---------- 扫描抽屉 ---------- */
+.scan-drawer { width: 560px; }
+
+.scan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 18px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.scan-roots-label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-dim);
+}
+
+#scan-roots {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  width: 100%;
+  resize: vertical;
+}
+#scan-roots:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.scan-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 列表自己滚动，否则 flex-shrink 会把它压窄、内容溢出来盖住底部导入栏。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.scan-empty {
+  padding: 22px 6px;
+  text-align: center;
+}
+
+.scan-group {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 8px 2px 2px;
+  word-break: break-all;
+}
+
+.scan-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.scan-row.duplicate { opacity: .55; }
+
+.scan-check { display: flex; align-items: center; padding-top: 2px; }
+.scan-check input { cursor: pointer; accent-color: var(--accent); }
+
+.scan-info { min-width: 0; flex: 1; }
+
+.scan-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.scan-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  word-break: break-all;
+}
+
+.scan-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.scan-badge.kind {
+  background: var(--surface);
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.scan-badge.low { background: var(--warn-soft); color: var(--warn); }
+.scan-badge.dup { background: var(--danger-soft); color: var(--danger); }
+
+.scan-cmd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 3px;
+  word-break: break-all;
+}
+
+.scan-sub {
+  font-size: 11.5px;
+  color: var(--text-mute);
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.scan-warn {
+  font-size: 11.5px;
+  color: var(--warn);
+  margin-top: 3px;
+}
+
+.scan-fill { flex: 0 0 auto; }
+
+.scan-more { margin: 2px 0 6px 11px; }
+
+.scan-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+.scan-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: auto;
+}
+
+.scan-summary {
+  font-size: 12px;
+  color: var(--text-mute);
+  text-align: right;
+}
+
+/* 硬约束：任何带 display:flex/grid 的新类名都要补 [hidden] 规则，
+   否则 JS 设置 hidden 后作者样式会盖住浏览器默认的 display:none。 */
+.scan-body[hidden],
+.scan-tools[hidden],
+.scan-list[hidden],
+.scan-row[hidden],
+.scan-line1[hidden],
+.scan-info[hidden],
+.scan-check[hidden],
+.scan-foot[hidden],
+.scan-empty[hidden],
+.scan-error[hidden] {
+  display: none;
 }
 
 /* ---------- Toast ---------- */
