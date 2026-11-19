@@ -113,7 +113,7 @@ try {
     Step '2) 编译并启动隔离服务'
     Push-Location $WorkRoot
     try {
-        & go build -trimpath -ldflags '-X main.version=0.2.0' -o $DevDockExe .
+        & go build -trimpath -ldflags '-X main.version=0.3.0' -o $DevDockExe .
         if ($LASTEXITCODE -ne 0) { throw 'DevDock 编译失败' }
     } finally {
         Pop-Location
@@ -206,8 +206,7 @@ if ($js -match "s\.confidence\s*!==\s*'low'" -and $js -match "s\.port\s*>\s*0\s*
 else { Fail 'app.js 默认勾选条件不符合 A3（应排除 low，且要求 port>0 或 framework 或 high）' }
     if ($js -match 'picks\.length\s*>\s*20') { Pass 'app.js 单批导入 ≤ 20（A3）' }
     else { Fail 'app.js 缺少单批 20 条上限（A3）' }
-    if ($js -match 'confirm\(') { Pass 'app.js 导入前二次确认（A3）' }
-    else { Fail 'app.js 缺少导入二次确认（A3）' }
+    if ($js -match 'dialog-mask' -and $js -match 'alertdialog') { Pass 'app.js 使用自绘确认弹窗做二次确认（A3）' } else { Fail 'app.js 缺少自绘确认弹窗（A3 二次确认）' }
     # A8：组内默认展开 5 条 + 「还有 N 条」。
     if ($js -match 'scan-more' -and $js -match 'items\.slice\(0,\s*5\)') { Pass 'app.js 组内折叠 + 还有 N 条（A8）' }
     else { Fail 'app.js 缺少组内折叠展开（A8）' }

@@ -114,7 +114,7 @@ try {
     New-Item -ItemType Directory -Force -Path $Bin, $AppData | Out-Null
     Push-Location $WorkRoot
     try {
-        & go build -trimpath -ldflags '-X main.version=0.2.0' -o $DevDockExe .
+        & go build -trimpath -ldflags '-X main.version=0.3.0' -o $DevDockExe .
         if ($LASTEXITCODE -ne 0) { throw 'DevDock 编译失败' }
         & go build -o $FixtureExe ./testsupport/fixture
         if ($LASTEXITCODE -ne 0) { throw '夹具编译失败' }

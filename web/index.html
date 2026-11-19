@@ -18,77 +18,143 @@
       </svg>
       <span class="title">DevDock</span>
     </div>
-    <div class="summary" id="summary">正在连接…</div>
+    <div class="live" id="live">
+      <span class="live-dot"></span>
+      <span id="summary">正在连接…</span>
+    </div>
+    <div class="topsearch">
+      <input id="search" type="search" placeholder="搜索项目…" autocomplete="off">
+    </div>
     <div class="topactions">
-      <button class="btn ghost" id="btn-scan" title="只读扫描本机可识别的开发项目">扫描本机</button>
-      <button class="btn ghost" id="btn-refresh" title="刷新列表">刷新</button>
+      <button class="btn primary" id="btn-new">+ 新建</button>
+      <button class="btn" id="btn-scan">扫描本机</button>
+      <button class="btn ghost" id="btn-refresh">刷新</button>
     </div>
   </header>
 
   <div class="banner" id="banner" hidden></div>
 
-  <main class="layout">
-    <aside class="sidebar">
-      <div class="sidebar-head">
-        <span>项目</span>
-        <button class="btn small" id="btn-new">+ 新建项目</button>
+  <main class="container">
+    <ul class="project-list" id="project-list"></ul>
+    <div class="empty" id="empty-hint" hidden>
+      <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6.5 10.5l2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11.5 15.5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      <p class="empty-title">还没有项目</p>
+      <p class="empty-desc">DevDock 把启动命令放进独立进程 Job，停止时整棵进程树一起清理。</p>
+      <div class="empty-actions">
+        <button class="btn primary" id="btn-empty-new">+ 新建项目</button>
+        <button class="btn" id="btn-empty-scan">扫描本机</button>
       </div>
-      <ul class="project-list" id="project-list"></ul>
-      <div class="empty" id="empty-hint" hidden>
-        <p class="empty-title">还没有任何项目</p>
-        <p class="empty-desc">点击上方"新建项目"添加第一个启动配方。<br>例如：命令 <code>npm run dev</code>，端口 <code>5173</code>。</p>
-      </div>
-    </aside>
-
-    <section class="detail" id="detail">
-      <div class="placeholder" id="placeholder">
-        <p class="placeholder-title">从左侧选择或新建一个项目</p>
-        <p class="placeholder-desc">DevDock 会把项目命令放到独立的进程 Job 里运行，停止时整棵进程树一起清理，不留孤儿进程。</p>
-      </div>
-
-      <div class="detail-body" id="detail-body" hidden>
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2 id="d-name">—</h2>
-              <p class="cwd" id="d-cwd">—</p>
-            </div>
-            <span class="pill" id="d-status">—</span>
-          </div>
-          <dl class="meta">
-            <div><dt>命令</dt><dd><code id="d-command">—</code></dd></div>
-            <div><dt>端口</dt><dd id="d-port">—</dd></div>
-            <div><dt>PID</dt><dd id="d-pid">—</dd></div>
-            <div><dt>运行时长</dt><dd id="d-uptime">—</dd></div>
-            <div><dt>就绪</dt><dd id="d-readiness">—</dd></div>
-          </dl>
-          <div class="error-box" id="d-error" hidden></div>
-          <div class="actions">
-            <button class="btn primary" id="btn-start">启动</button>
-            <button class="btn" id="btn-stop">停止</button>
-            <button class="btn" id="btn-restart">重启</button>
-            <button class="btn ghost" id="btn-edit">编辑</button>
-            <button class="btn ghost" id="btn-folder">打开目录</button>
-            <button class="btn danger ghost" id="btn-delete">删除</button>
-          </div>
-        </div>
-
-        <div class="card logcard">
-          <div class="card-head">
-            <h3>日志</h3>
-            <div class="logtools">
-              <span class="counter" id="log-count">0 行</span>
-              <label class="check"><input type="checkbox" id="chk-follow" checked> 跟随</label>
-              <label class="check" title="部分项目可能输出 GBK 编码的中文"><input type="checkbox" id="chk-gbk"> GBK</label>
-              <button class="btn small ghost" id="btn-clearlog">清屏</button>
-            </div>
-          </div>
-          <div class="gapbar" id="gapbar" hidden>部分日志已过期，已跳过中间内容</div>
-          <pre class="logview" id="logview"></pre>
-        </div>
-      </div>
-    </section>
+      <p class="empty-example"><code>npm run dev</code> · <code>:5173</code></p>
+    </div>
+    <div class="empty" id="search-empty" hidden>
+      <p class="empty-title">没有匹配的项目</p>
+      <button class="btn" id="btn-clear-search">清除搜索</button>
+    </div>
   </main>
+</div>
+
+<!-- 日志抽屉 -->
+<div class="drawer-mask" id="log-mask" hidden>
+  <aside class="drawer log-drawer" role="dialog" aria-modal="true" aria-labelledby="log-title">
+    <header class="drawer-head">
+      <div class="drawer-title">
+        <h2 id="log-title">项目名</h2>
+        <code id="log-cmd">—</code>
+      </div>
+      <button class="btn icon ghost" id="btn-close-log" aria-label="关闭">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="log-tools">
+      <input id="log-filter" placeholder="过滤日志…" autocomplete="off">
+      <label class="check"><input type="checkbox" id="chk-stderr"> 仅看错误</label>
+      <label class="check"><input type="checkbox" id="chk-ts" checked> 时间戳</label>
+      <label class="check"><input type="checkbox" id="chk-gbk"> GBK</label>
+      <label class="check"><input type="checkbox" id="chk-follow" checked> 跟随</label>
+      <button class="btn sm" id="btn-jump">跳到底部</button>
+      <button class="btn sm ghost" id="btn-copy">复制全部</button>
+      <button class="btn sm ghost" id="btn-clearlog">清屏</button>
+    </div>
+    <div class="gapbar" id="gapbar" hidden>部分日志已过期，已跳过中间内容</div>
+    <pre class="logview" id="logview"></pre>
+    <footer class="log-foot">
+      <span id="log-count">0 行</span>
+      <span id="log-follow-hint" hidden>已取消跟随（上滚查看历史）</span>
+    </footer>
+  </aside>
+</div>
+
+<!-- 详情抽屉 -->
+<div class="drawer-mask" id="detail-mask" hidden>
+  <aside class="drawer detail-drawer" id="detail" role="dialog" aria-modal="true" aria-labelledby="d-name">
+    <header class="drawer-head">
+      <div class="drawer-title">
+        <h2 id="d-name">—</h2>
+        <code id="d-cwd">—</code>
+      </div>
+      <button class="btn icon ghost" id="btn-close-detail" aria-label="关闭">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="detail-body" id="detail-body">
+      <div class="pill-row"><span class="pill" id="d-status">—</span></div>
+      <dl class="meta">
+        <div class="meta-wide"><dt>命令</dt><dd><code id="d-command">—</code></dd></div>
+        <div><dt>端口</dt><dd id="d-port">—</dd></div>
+        <div><dt>PID</dt><dd id="d-pid">—</dd></div>
+        <div><dt>运行时长</dt><dd id="d-uptime">—</dd></div>
+        <div><dt>就绪</dt><dd id="d-readiness">—</dd></div>
+        <div><dt>自动启动</dt><dd id="d-autostart">—</dd></div>
+        <div><dt>创建时间</dt><dd id="d-created">—</dd></div>
+        <div><dt>更新时间</dt><dd id="d-updated">—</dd></div>
+      </dl>
+      <div class="detail-section">
+        <h3>环境变量</h3>
+        <div class="env-box" id="d-env">—</div>
+      </div>
+      <div class="error-box" id="d-error" hidden></div>
+      <div class="actions">
+        <button class="btn primary" id="btn-start">启动</button>
+        <button class="btn" id="btn-stop">停止</button>
+        <button class="btn" id="btn-restart">重启</button>
+        <button class="btn ghost" id="btn-edit">编辑</button>
+        <button class="btn ghost" id="btn-folder">打开目录</button>
+        <button class="btn danger ghost" id="btn-delete">删除</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- 扫描本机抽屉：只产出建议，导入需用户显式触发 -->
+<div class="drawer-mask" id="scan-mask" hidden>
+  <aside class="drawer scan-drawer" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+    <div class="drawer-head">
+      <h2 id="scan-title">扫描本机项目</h2>
+      <button class="btn icon ghost" id="btn-close-scan" aria-label="关闭">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="scan-body">
+      <label class="scan-roots-label" for="scan-roots">扫描根目录（留空 = 默认白名单，最多 8 个；用 ; 或换行分隔）</label>
+      <textarea id="scan-roots" rows="2" placeholder="例如：D:\Desktop;D:\projects"></textarea>
+      <div class="scan-tools">
+        <button class="btn primary" id="scan-start">开始扫描</button>
+        <button class="btn" id="scan-cancel" hidden>取消</button>
+        <label class="check" title="默认隐藏 confidence=low 的条目"><input type="checkbox" id="scan-all"> 显示 low 置信度</label>
+        <span class="counter" id="scan-status"></span>
+      </div>
+      <div class="scan-list" id="scan-list"></div>
+      <div class="scan-error" id="scan-error" hidden></div>
+      <div class="scan-foot">
+        <button class="btn" id="scan-import" disabled>导入选中 (0)</button>
+        <span class="scan-summary" id="scan-summary">尚未扫描</span>
+      </div>
+    </div>
+  </aside>
 </div>
 
 <!-- 新建/编辑抽屉 -->
@@ -96,36 +162,45 @@
   <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
     <div class="drawer-head">
       <h2 id="drawer-title">新建项目</h2>
-      <button class="btn ghost small" id="btn-close-drawer">关闭</button>
+      <button class="btn icon ghost" id="btn-close-drawer" aria-label="关闭">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <form id="project-form" class="form">
-      <label>项目名称 <span class="req">*</span>
-        <input name="name" required maxlength="80" placeholder="例如：前端 dev server">
-      </label>
-      <label>项目 ID
-        <input name="id" maxlength="64" placeholder="留空自动生成，如 web-app">
-        <span class="hint">仅字母、数字、下划线和连字符；创建后不可修改</span>
-      </label>
-      <label>工作目录 <span class="req">*</span>
-        <input name="cwd" required placeholder="D:\proj\web-app">
-        <span class="hint">必须是已存在的绝对路径</span>
-      </label>
-      <label>启动命令 <span class="req">*</span>
-        <input name="command" required maxlength="8192" placeholder="npm run dev">
-        <span class="hint">单行命令，通过 cmd 执行。请写前台阻塞式命令，勿写 start，否则进程树无法被可靠清理</span>
-      </label>
-      <div class="row">
-        <label>端口
-          <input name="port" type="number" min="0" max="65535" placeholder="5173">
+      <div class="form-group">
+        <div class="form-group-title">基本</div>
+        <label>项目名称 <span class="req">*</span>
+          <input name="name" required maxlength="80" placeholder="例如：前端 dev server">
         </label>
-        <label>就绪路径
-          <input name="readyPath" placeholder="/">
+        <label>项目 ID
+          <input name="id" maxlength="64" placeholder="留空自动生成，如 web-app">
+          <span class="hint">仅字母、数字、下划线和连字符；创建后不可修改</span>
+        </label>
+        <label>工作目录 <span class="req">*</span>
+          <input name="cwd" required placeholder="D:\proj\web-app">
+          <span class="hint">必须是已存在的绝对路径</span>
+        </label>
+        <label>启动命令 <span class="req">*</span>
+          <input name="command" required maxlength="8192" placeholder="npm run dev">
+          <span class="hint">单行命令，通过 cmd 执行。请写前台阻塞式命令，勿写 start，否则进程树无法被可靠清理</span>
         </label>
       </div>
-      <div class="row">
+      <div class="form-group">
+        <div class="form-group-title">就绪</div>
+        <div class="row">
+          <label>端口
+            <input name="port" type="number" min="0" max="65535" placeholder="5173">
+          </label>
+          <label>就绪路径
+            <input name="readyPath" placeholder="/">
+          </label>
+        </div>
         <label>就绪超时（秒）
           <input name="readyTimeout" type="number" min="1" max="300" placeholder="30">
         </label>
+      </div>
+      <div class="form-group">
+        <div class="form-group-title">启动</div>
         <label>启动 DevDock 时自动启动
           <select name="autostart">
             <option value="false">否</option>
@@ -133,9 +208,13 @@
           </select>
         </label>
       </div>
-      <label>环境变量
-        <textarea name="env" rows="3" placeholder="每行一个 KEY=VALUE"></textarea>
-      </label>
+      <div class="form-group">
+        <div class="form-group-title">环境变量</div>
+        <label>环境变量
+          <textarea name="env" rows="3" placeholder="每行一个 KEY=VALUE"></textarea>
+          <span class="hint">每行一个 KEY=VALUE，# 开头为注释</span>
+        </label>
+      </div>
       <div class="form-error" id="form-error" hidden></div>
       <div class="drawer-actions">
         <button type="button" class="btn ghost" id="btn-cancel">取消</button>
@@ -145,30 +224,16 @@
   </aside>
 </div>
 
-<!-- 扫描本机抽屉：只产出建议，导入需用户显式触发 -->
-<div class="drawer-mask" id="scan-mask" hidden>
-  <aside class="drawer scan-drawer" role="dialog" aria-modal="true" aria-labelledby="scan-title">
-    <div class="drawer-head">
-      <h2 id="scan-title">扫描本机项目</h2>
-      <button class="btn ghost small" id="btn-close-scan">关闭</button>
+<!-- 自绘确认弹窗（替换原生 confirm） -->
+<div class="dialog-mask" id="dialog-mask" hidden>
+  <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title">
+    <h3 id="dialog-title"></h3>
+    <p id="dialog-desc"></p>
+    <div class="dialog-actions">
+      <button class="btn" id="dialog-cancel">取消</button>
+      <button class="btn danger" id="dialog-ok">确认</button>
     </div>
-    <div class="scan-body">
-      <label class="scan-roots-label" for="scan-roots">扫描根目录（留空 = 默认白名单，最多 8 个；用 ; 或换行分隔）</label>
-      <textarea id="scan-roots" rows="2" placeholder="例如：D:\Desktop;D:\projects"></textarea>
-      <div class="scan-tools">
-        <button class="btn primary" id="scan-start">开始扫描</button>
-        <button class="btn" id="scan-cancel" hidden>取消</button>
-        <label class="check" title="默认隐藏 confidence=low 的条目"><input type="checkbox" id="scan-all"> 包含 low</label>
-        <span class="counter" id="scan-status"></span>
-      </div>
-      <div class="scan-error" id="scan-error" hidden></div>
-      <div class="scan-list" id="scan-list"></div>
-      <div class="scan-foot">
-        <button class="btn" id="scan-import" disabled>导入选中 (0)</button>
-        <span class="scan-summary" id="scan-summary">尚未扫描</span>
-      </div>
-    </div>
-  </aside>
+  </div>
 </div>
 
 <div class="toast-wrap" id="toast-wrap"></div>
