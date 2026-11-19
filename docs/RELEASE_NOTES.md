@@ -1,10 +1,10 @@
 # 发布说明
 
-## v0.3.0（待发布）
+## v0.3.0（已发布）
 
 这一版只做一件事：**按同类工具的做法重做界面**。用户原话：「我感觉现在不好用也不好看，不是让你去调研其他这种类似的工具是怎么做的嘛」。功能面（CLI、HTTP、自动识别、进程管理）一行没动，改的是 `web/` 里的界面与交互。
 
-产物：`DevDock.exe`，10789376 bytes，SHA-256 `5EEF5B8E0A92310F43B186A21C4261D33B9D76D97D87C68F07908155B626F7BD`。
+产物：`DevDock.exe`，10789376 bytes，SHA-256 `5EEF5B8E0A92310F43B186A21C4261D33B9D76D97D87C68F07908155B626F7BD`。发布页：<https://github.com/YIbaikaishui/DevDock/releases/tag/v0.3.0>。
 
 调研与规格：[`docs/UX_RESEARCH.md`](UX_RESEARCH.md)、[`docs/UI_REWORK_SPEC.md`](UI_REWORK_SPEC.md)。
 
