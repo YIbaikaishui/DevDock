@@ -38,12 +38,25 @@ DevDock 监听 `127.0.0.1`，配置保存在 `%APPDATA%\DevDock`。已被管理�
 
 CLI 是自动化和 coding agent 的首选接口。JSON 模式便于脚本消费，退出码区分常见错误。MCP 可通过显式的 `DevDock.exe mcp` 命令按需使用；不用 MCP 的客户端无需接入或加载它的工具定义。
 
+## 界面
+
+界面是纯静态的 `web/`（`index.html` + `style.css` + `app.js`），由 Go 内嵌提供：没有前端构建链、没有第三方依赖、不用 CDN。
+
+- **顶栏**：品牌 + 实时汇总（N/M 运行中）+ 居中搜索 + 新建 / 扫描本机 / 刷新。
+- **主列**：居中 800px 单列，一个项目一张卡：状态点 + 名称 + 状态胶囊 + 命令 / 端口 / 运行时长 / 就绪延迟 + 操作。
+- **右侧全高抽屉**：日志、详情、扫描、新建/编辑，互斥打开（同时只有一个）。
+- **确认框**：删除等危险操作用自绘 `alertdialog`，不依赖浏览器原生 `confirm()`。
+- **窄屏**：`max-width: 640px` 下顶栏换行、卡片堆叠、抽屉占满宽度。
+- 不执行内联脚本（CSP），DOM 写入只用 `textContent` / `createElement`。
+
+视觉与交互参考了同类本地开发面板，调研与规格见 [`docs/UX_RESEARCH.md`](docs/UX_RESEARCH.md)、[`docs/UI_REWORK_SPEC.md`](docs/UI_REWORK_SPEC.md)。
+
 ## 核心行为
 
 - 生命周期与 HTTP readiness 分开报告：进程启动不等于业务已就绪。
 - 停止项目时使用 Windows Job Object 清理进程树。
 - 日志保存在有界内存缓冲区；磁盘日志默认关闭。
-- UI 通过本机 HTTP 服务提供，包含状态推送。
+- UI 通过本机 HTTP 服务提供，包含状态推送；界面结构见上一节。
 - 自动化接口只绑定 loopback，并校验本机请求。
 - `scan` 是**只读**的：不写文件、不启动进程、不改配置，只产出「建议」。
   导入必须显式触发（UI 勾选后导入，或 `add --auto`）。
@@ -59,7 +72,7 @@ cd work
 $env:CGO_ENABLED = "0"
 go vet ./...
 go test -count=1 ./...
-go build -trimpath -ldflags "-X main.version=0.2.0" -o ..\outputs\DevDock.exe .
+go build -trimpath -ldflags "-X main.version=0.3.0" -o ..\outputs\DevDock.exe .
 ```
 
 不要加 `-H=windowsgui`：那会把程序变成无控制台窗口的 GUI 程序，`list`、`status`、`logs` 等命令就再也不会向终端输出任何内容，与 CLI 优先的定位冲突。

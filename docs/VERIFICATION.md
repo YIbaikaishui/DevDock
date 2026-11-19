@@ -1,10 +1,171 @@
 # DevDock 验证记录
 
-当前构建：DevDock.exe 版本 0.2.0，10752000 bytes，SHA-256 `FE9B83C0A9241CF9CFD8BC2D4612CE8E5496156C13738176BA665F52592AC71F`。
+当前构建：DevDock.exe 版本 **0.3.0（待发布）**，10789376 bytes，SHA-256 `5EEF5B8E0A92310F43B186A21C4261D33B9D76D97D87C68F07908155B626F7BD`。0.3.0 的最后一次实测见下一节；本文件下半部分是 0.2.0 / 0.1.0 的历史记录。
 
 本文件只写**实际跑过并留有输出**的内容。没有跑过的写在「未验证」一节，不并入结论。
 
-## 构建与静态检查
+## 0.3.0：界面重构（待发布）
+
+起因是用户反馈：「我感觉现在不好用也不好看，不是让你去调研其他这种类似的工具是怎么做的嘛」。流程为：只读调研 → 主 agent 拍板规格 → 开发 → 主 agent 独立验收。
+
+- 调研：[`docs/UX_RESEARCH.md`](UX_RESEARCH.md)（含参考实现 devwebui 的布局骨架与视觉 token，以及 Laravel Herd / DDEV / Lando / pm2 / lazydocker / Portainer / Orb Stack / Rancher Desktop / Homarr / Warp / VS Code 终端的联网调研表）。
+- 规格：[`docs/UI_REWORK_SPEC.md`](UI_REWORK_SPEC.md)（R1–R20 裁决 + 视觉 token + 验收清单 + 偏差记录）。
+
+### 调研要点
+
+- 同类工具的共同做法是「一个项目一张卡 + 右侧抽屉看细节」，不是「左侧树 + 大表格」；顶栏承担全局操作与搜索。
+- 状态用**颜色 + 文案**双通道表达，而不是只有一颗彩色圆点。
+- 日志一律独立面板，带过滤、跟随、时间戳/编码开关。
+- 危险操作二次确认，且产品自带确认框，不依赖浏览器原生 `confirm()`。
+
+### 重构后的界面
+
+- 顶栏：品牌 + 实时汇总（N/M 运行中）+ 居中搜索 + 新建 / 扫描本机 / 刷新。
+- 主列：居中 800px 单列，一个项目一张卡（状态点 + 名称 + 状态胶囊 + 命令 / 端口 / 运行时长 / 就绪延迟 + 操作）。
+- 右侧全高抽屉：日志、详情、扫描、新建/编辑，**互斥打开**（同时只有一个）。
+- 自绘 `alertdialog` 确认弹窗，替换全部原生 `confirm()`。
+- 窄屏（< 640px）规则：顶栏换行、卡片堆叠、抽屉整宽。
+
+### 构建与静态检查（实测）
+
+```text
+go build ./...                                                                            BUILD_EXIT=0
+go vet ./...                                                                              VET_EXIT=0
+go build -trimpath -ldflags "-X main.version=0.3.0" -o ..\outputs\DevDock.exe .            BUILD_EXIT=0
+```
+
+产物：`outputs/DevDock.exe`，10789376 bytes，SHA-256 `5EEF5B8E0A92310F43B186A21C4261D33B9D76D97D87C68F07908155B626F7BD`。
+
+### 自动化测试（实测）
+
+```text
+go test -count=1 ./...
+?   devdock                         [no test files]
+?   devdock/internal/cli            [no test files]
+ok  devdock/internal/client         5.053s
+?   devdock/internal/config         [no test files]
+ok  devdock/internal/detect         7.962s
+ok  devdock/internal/httpapi        5.387s
+ok  devdock/internal/logs           2.587s
+ok  devdock/internal/mcpserver      4.353s
+?   devdock/internal/model          [no test files]
+?   devdock/internal/ready          [no test files]
+ok  devdock/internal/runner         6.170s
+ok  devdock/internal/store          2.259s
+ok  devdock/internal/winproc        2.665s
+?   devdock/testsupport/fixture     [no test files]
+?   devdock/web                     [no test files]
+TEST_EXIT=0
+```
+
+### 端到端（实测）
+
+`testsupport/e2e/run_e2e.ps1`：
+
+```text
+E2E_RESULT=PASS
+E2E_IDLE_WORKINGSET_MIB=11.6
+E2E_BOOT_MS=403
+E2E_START_API_MEDIAN_MS=38.3
+```
+
+启动到可响应 403 ms、空闲 working set 11.6 MiB、`start` API 到进程已 spawn 中位数 38.3 ms，三项都在目标内（< 1000 ms / < 50 MiB / < 100 ms）。三层进程树（`cmd.exe → fixture.exe → fixture.exe -child`）停止后全部消失、端口释放。
+
+`testsupport/e2e/run_scan_e2e.ps1`：
+
+```text
+SCAN_E2E_RESULT=PASS
+SCAN_E2E_MS=2721
+SCAN_E2E_SUGGESTIONS=3
+SCAN_E2E_SCAN_ONLY_MS=28
+```
+
+两个脚本里的 `-X main.version` 已从 0.2.0 同步改为 0.3.0。
+
+### 发布前复测（2026-11-19，同一构建）
+
+提交前在本机又跑了一遍，**功能全绿，但性能数字明显高于上表**，如实记录如下，不要读成代码回退：
+
+```text
+go test -count=1 -vet=off -p 1 ./...（拆两批串行）    EXIT=0
+  client 3.136s / detect 5.489s / logs 1.418s / runner 4.580s
+  store 1.946s / winproc 2.596s / mcpserver 2.982s / httpapi 3.582s
+
+run_e2e.ps1  第 1 次   E2E_RESULT=PASS  BOOT_MS=2966   START_API_MEDIAN_MS=2000.1
+run_e2e.ps1  第 2 次   E2E_RESULT=PASS  BOOT_MS=869    START_API_MEDIAN_MS=608.6
+run_scan_e2e.ps1        SCAN_E2E_RESULT=PASS  SCAN_E2E_MS=21534  SCAN_ONLY_MS=243
+```
+
+**为什么判断是环境噪声而不是回退**（同一份源码、同一台机器、同一天）：
+
+- 本次会话里 `go build ./...` 从不足 2 秒变成 **128 秒**；
+- 并发 `go test ./...` 直接**卡死超过 10 分钟**（`-p 1` 串行后 3–6 秒/包），与 `GATES.md` §3.2 记录的「杀毒抢锁」现象一致；
+- `run_scan_e2e.ps1` 里与界面无关的 `scan` 本身从 **28 ms 变成 243 ms**（约 8 倍）。
+
+按同一倍率折算，早前的 `start` API 38.3 ms 对应本次约 300–600 ms，与实测 608.6 ms 吻合。**功能判据（进程树整树清理、端口释放、只读性、不新建进程）全部 PASS，未受影响。** 上表的 403 ms / 38.3 ms 仍是本构建在本机最快的一次实测，保留不删。
+
+### 真实浏览器走查（实测）
+
+用 `paw browser-action` 在真实 Chrome 里逐项走完（隔离实例，APPDATA=`_e2e\appdata-ui`）：
+
+```text
+主界面     项目卡显示 命令/端口/运行时长/就绪延迟/状态；fixture-e2e 启动后
+           状态胶囊=就绪，名称变成 <a href="http://127.0.0.1:53045">
+日志抽屉   24 行、可滚动（scrollHeight 1897 / clientHeight 553）
+           上滚到底之外 -> hintHidden=false, followChecked=false
+           回到底部       -> hintHidden=true,  followChecked=true
+           过滤 FIXTURE_PID -> 1 行 + 1 个 <mark> 高亮
+           过滤 zzz-no-match -> 0 行 + 「没有匹配「zzz-no-match」的日志」
+详情抽屉   命令 / cwd / 端口 / PID / 运行时长 / 就绪（1210 ms · 已就绪）/
+           自动启动 / 创建时间 / 更新时间 / 环境变量 全部渲染
+扫描抽屉   分组标题=末段 work，title=完整路径（修 U15）
+           3 条建议、默认勾选 2 条；web-a 带「已存在」徽章且不勾
+           忽略 -> 行加 .ignored、「已忽略」徽章、勾选禁用、计数 2 -> 1
+           撤销 -> 徽章移除、勾选恢复可用
+           填入表单 -> 关闭扫描抽屉、打开新建表单并填好
+                    （web-b / D:\...\scanroot\web-b / npm run dev / 3001），焦点在名称
+更多菜单   编辑 / 打开目录 / 删除
+           删除 -> 自绘 alertdialog（标题/描述/取消/删除），
+                 取消后焦点落回「删除」，项目仍在（2 张卡）
+搜索       web  -> 只剩 web-a；zzz -> 空态 +「清除搜索」；
+           点清除 -> 恢复 2 张卡且输入框清空
+焦点圈     扫描抽屉打开时 Tab 从最后一个控件回到第一个，Shift+Tab 反向
+主题       亮色（:root）与暗色（prefers-color-scheme: dark）都正常渲染
+```
+
+走查中修掉的缺陷（详见 `UI_REWORK_SPEC.md` §12）：
+
+1. **项目名整条不显示**：`.p-name` 是 flex 子项且带 `overflow:hidden`，自动最小宽度为 0，被压成 0 宽。加 `flex:1 1 auto; min-width:0`。
+2. **端口/时长被挤没**：`.p-meta` 换行后 `.p-cmd` 占满整行，端口被顶到下一行。改 `nowrap` + `.p-cmd` 改 `flex:0 1 auto`；再给 `.p-port/.p-up/.p-note` 加 `flex:0 0 auto; white-space:nowrap`，空间不足时只由命令省略。
+3. **完全没有窄屏规则**：317px 视口下顶栏按钮被推出视口、卡片名称消失。新增 `@media (max-width: 640px)`。
+4. **窄屏下抽屉只有 44vw**（317px → 139px），扫描行被挤成逐字竖排。media 内改为整宽。
+5. **抽屉关闭后焦点掉回 body**：`renderList()` 整表重建把触发按钮移出文档，`restoreFocus()` 无处可还。改为按「卡片 id + data-act」重新定位（实测 Esc 后焦点回到 `data-act=logs` / `data-act=detail`）。
+6. **删除确认弹窗取消后焦点掉回 body**：菜单先被 `closeMenu()` 隐藏，触发按钮进了隐藏层。改为弹窗期间菜单保持打开，确认时才关。
+7. **Esc 关不掉「更多」菜单**。补上，并把焦点还给「更多」按钮。
+8. **抽屉/弹窗没有焦点圈**，Tab 能跑到背后页面，`aria-modal` 形同虚设。补 Tab 圈。
+9. **忽略态缺「已忽略」徽章**（规格 §6.2 要求，`.scan-badge.ignored` 样式早就写好但没用上）。
+
+### 交付物冒烟（实测）
+
+用 `outputs/DevDock.exe`（0.3.0）在隔离 APPDATA 下：
+
+```text
+HTTP=200 BODY={"configPath":"...\_smoke3\DevDock\config.json","ok":true,"pid":17156,"uptimeSec":0,"version":"0.3.0"}
+PID=17156 PORT=56326
+DevDock 0.3.0                                            VERSION_EXIT=0
+UI_STATUS=200 UI_BYTES=11295
+CLEANUP_REMAINING=0
+```
+
+### 截图
+
+`_e2e/`（该目录在 `.gitignore` 里，只作本地归档）：`ui-main-live.png`、`ui-main-narrow.png`、`ui-log-open.png`、`ui-detail-open.png`、`ui-scan-open2.png`、`ui-drawer-open.png`。被它们取代的三张旧图（`ui-main.png`、`ui-drawer.png`、`ui-scan-open.png`）已删除。
+
+**视口说明**：paw 浏览器的 WebContentsView 只有 317px CSS 宽，截图全部是在这个宽度下拍的；≥ 1000px 的桌面排版未截图。
+
+**键盘投递说明**：会话早期真实按键可用（日志抽屉被真实 Esc 关闭过一次），后期 paw 无法把按键投递到页面（页面收到 0 次 keydown）。因此除那一次之外的 Esc 路径，都是用 `dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'}))` 验证处理逻辑，**不能声称全部 Esc 路径都用过真实按键**。
+
+## 0.2.0：构建与静态检查
 
 ```text
 go build ./...                                            BUILD_EXIT=0
@@ -14,7 +175,7 @@ go build -trimpath -ldflags "-X main.version=0.2.0" ...   BUILD_EXIT=0
 
 产物：`outputs/DevDock.exe`，10752000 bytes，SHA-256 `FE9B83C0A9241CF9CFD8BC2D4612CE8E5496156C13738176BA665F52592AC71F`。
 
-## 自动化测试
+## 0.2.0：自动化测试
 
 0.1.0 时全量命令的退出码是 1，此前记录为「本机临时测试 exe 删除权限问题，未定位」。现在已定位到根因并修复，不再是环境问题。
 
@@ -63,7 +224,7 @@ TEST_EXIT=0
 
 连续多次运行均为 `TEST_EXIT=0`，`unlinkat` 报错不再出现。**全量测试命令现在通过。**
 
-## 端到端验收（真实受管项目）
+## 0.2.0：端到端验收（真实受管项目）
 
 0.1.0 曾尝试用 `.cmd` 批处理做夹具，遇到 `ERROR: Input redirection is not supported`，那次不算成功。现在改用 `testsupport/fixture`（Go 程序），脚本为 `testsupport/e2e/run_e2e.ps1`，全程使用隔离 APPDATA。
 
@@ -171,7 +332,7 @@ E2E_BOOT_MS=281
 E2E_START_API_MEDIAN_MS=16.8
 ```
 
-## 性能实测
+## 0.2.0：性能实测
 
 同一台机器、同一构建、隔离 APPDATA。四次连续运行：
 
@@ -211,7 +372,7 @@ E2E_START_API_MEDIAN_MS=16.8
 
 作为对照，调研阶段用 Python 参考实现跑同一棵树：同进程内首次 11.9 s，后续 0.7–2.2 s。Go 版把「冷缓存 + 5000 目录」的最坏情况压进了 2 s 预算内。
 
-## 交付物冒烟
+## 0.2.0：交付物冒烟
 
 用构建出的 `outputs/DevDock.exe`（不是测试目录里的副本），在隔离 APPDATA 下：
 
@@ -224,7 +385,7 @@ UI_STATUS=200 UI_BYTES=7907
 CLEANUP_REMAINING=0
 ```
 
-## 本轮修复的其它缺陷
+## 0.2.0：本轮修复的其它缺陷
 
 除上述 fork bomb 外，端到端与界面走查过程中还发现并修复了三个缺陷（前两个会让 README 里的示例直接不可用）：
 
@@ -300,12 +461,12 @@ navigate http://127.0.0.1:60244/?t=<token>
 2. **默认勾选会勾到 CLI 工具**：原来的默认勾选只看 `confidence !== 'low'`，会把 `node dist/cli.js --no-open`、`node serve.cjs` 这类条目勾上，一键导入就是一键导入一堆启动即退出的项目。已改为「非 low 且有端口 / 有框架 / high」才默认勾（Go 服务没有端口与框架线索，靠 high 兜住）；默认勾选数 24 → 26（Go 的两条回归勾选），无端口无框架的 15 条仍列出但不勾。
 3. **扫描列表溢出盖住底部导入栏**：`.scan-list` 被 flex 压窄后内容溢出，视觉上叠在「导入选中」按钮下面。已改为列表自身滚动（`flex:1 1 auto; min-height:0; overflow-y:auto`），浏览器复验正常。
 
-## 未验证
+## 未验证（截至 0.3.0）
 
 以下内容没有跑过，不并入上面的结论：
 
 - **MCP 与真实 MCP host 对接**。目前只有协议层单测（握手、tools/list、错误码、stdout 洁净性等），未在 Claude Desktop、Cursor 等真实客户端中加载验证。
-- **浏览器端交互体验**。扫描抽屉已在真实 Chrome 里走通（见上一节），但首屏渲染、SSE 日志推送、托盘等桌面交互仍未在真实浏览器/系统里验证。
+- **浏览器端交互体验的覆盖范围**。0.3.0 已在真实 Chrome 里走通主界面、日志/详情/扫描/表单四个抽屉、更多菜单、自绘确认框、搜索、焦点圈与两套主题（见上一节）。仍未验证的：SSE 状态推送（断线重连）、托盘交互、≥ 1000px 桌面宽度下的排版截图。
 - **长时间稳定性**。没有做数小时/数天的持续运行、日志环形缓冲长期溢出、SSE 长时间连接断线重连的压测。
 - **多项目并发**。端到端只验证了单项目；同时启动多个项目、端口冲突场景下的表现为未验证。
 - **冷缓存扫描**。只测到「同一进程内首次 121 ms」；没有重启机器或清 FS 缓存后复测真冷缓存。
